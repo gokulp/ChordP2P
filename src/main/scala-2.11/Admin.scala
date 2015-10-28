@@ -28,18 +28,22 @@ class Admin(numNodes:Int, numRequests:Int) extends Actor{
       nodeRef += context.actorOf(Props(classOf[Node], base, i), name = "node"+i)
       var future2: Future[Int] = ask(nodeRef(i), Join(nodeRef(i-1))).mapTo[Int];
       var p:Int = Await.result(future2, timeout.duration);
-      println("Node "+i+" Joined with code "+p)
+      //println("Node "+i+" Joined with code "+p)
     }
     println("Topology complete!")
   }
   override def receive = {
+    case Hops(hops:Long) =>
+      println("Number hops for "+sender+ " were "+hops )
     case StartSystem =>
       createTopology()
       println("base is "+base + " max nodes allowed is "+ Math.pow(2, base).toLong)
-      nodeRef(73) ! TestMessage(50, 1)
-    case x:Long =>
-      println("Number hopes for "+sender+ " were "+x )
+      nodeRef(7) ! TestMessage(5, 1)
+      //context.system.shutdown();
+      //System.exit(0)
+/*
     case _ =>
       println("Recieved unknown message!")
+*/
   }
 }
