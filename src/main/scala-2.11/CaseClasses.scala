@@ -12,4 +12,5 @@ case class UpdateFingerTable(inputID:Long, nodeRef:ActorRef, i:Int, startRef:Act
 case class FindSuccessor(inputID:Long);
 case class FindPredecessor(inputID:Long)
 case class ClosestPrecedingFinger(inputID:Long)
-case class TestMessage(ident: Long, hopes: Long)
+case class TestMessage(ident: Long, hops: Long)
+case class Hops(hops:Long)
