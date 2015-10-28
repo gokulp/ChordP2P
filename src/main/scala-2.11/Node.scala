@@ -53,7 +53,7 @@ class Node (base:Int, id:Int) extends Actor {
 
 
   def checkRange(start:Long, end:Long, inputID:Long): Boolean ={
-    if (/*(start == end) ||*/ (start < end && start < inputID && inputID < end) ||
+    if ((start == end) || (start < end && start < inputID && inputID < end) ||
       (start > end && (inputID == 0 || (inputID > start && inputID > end) || (inputID < start && inputID < end)))) {
       return true
     } else {
@@ -61,7 +61,7 @@ class Node (base:Int, id:Int) extends Actor {
     }
   }
   def checkRangeStartInclusive(start:Long, end:Long, inputID:Long): Boolean ={
-    if (/*(start == end) || */(start < end && start <= inputID && inputID < end) ||
+    if ((start == end) || (start < end && start <= inputID && inputID < end) ||
       (start > end && (inputID == 0 || (inputID >= start && inputID > end) || (inputID <= start && inputID < end)))) {
       return true
     } else {
@@ -69,7 +69,7 @@ class Node (base:Int, id:Int) extends Actor {
     }
   }
   def checkRangeEndInclusive(start:Long, end:Long, inputID:Long): Boolean ={
-    if (/*(start == end) || */(start < end && start < inputID && inputID <= end) ||
+    if ((start == end) || (start < end && start < inputID && inputID <= end) ||
       (start > end && (inputID == 0 || (inputID > start && inputID >= end) || (inputID < start && inputID <= end)))) {
       return true
     } else {
@@ -78,7 +78,7 @@ class Node (base:Int, id:Int) extends Actor {
   }
 
   def checkRangeBothInclusive(start:Long, end:Long, inputID:Long): Boolean ={
-    if (/*(start == end) || */(start < end && start <= inputID && inputID <= end) ||
+    if ((start == end) || (start < end && start <= inputID && inputID <= end) ||
       (start > end && (inputID == 0 || (inputID >= start && inputID >= end) || (inputID <= start && inputID <= end)))) {
       return true
     } else {
@@ -92,6 +92,8 @@ class Node (base:Int, id:Int) extends Actor {
 
   def find_successor(inputID:Long): ActorRef = {
     //println("In find_successor of identifier "+ identifier)
+    if (fingerTable(0).node == self)
+      return(self)
     implicit val timeout = new Timeout(Duration.create(100, "seconds"));
     //var future: Future[ActorRef] = ask(self, FindPredecessor(inputID)).mapTo[ActorRef];
     //var result:ActorRef = Await.result(future, timeout.duration);
@@ -103,7 +105,7 @@ class Node (base:Int, id:Int) extends Actor {
       node = Await.result(future2, timeout.duration);
     }
     //println("Sending back node.successorRef: "+successorRef)
-    return(node.successorRef)
+    return(node.fingerTable(0).node)
   }
 
   //ask node n to find id's predecessor
@@ -118,8 +120,12 @@ class Node (base:Int, id:Int) extends Actor {
     var node:ActorRef = null;
     var nprime = this
     var nprimeRef = self
+    if (predecessor == inputID)
+      return(predecessorRef)
+    if (fingerTable(0).successor == inputID)
+      return(fingerTable(0).node)
     //println(nprime.identifier+ " "+nprime.successor+" "+inputID)
-    if ( checkRangeEndInclusive(nprime.identifier, nprime.successor, inputID) ){
+    if ( checkRangeEndInclusive(nprime.identifier, nprime.fingerTable(0).successor, inputID) ){
       return(self)
     } else {
       return(closest_preceding_finger(inputID))
@@ -140,7 +146,7 @@ class Node (base:Int, id:Int) extends Actor {
     implicit val timeout = new Timeout(Duration.create(100, "seconds"));
     //var future:Future[Int] = ask(actor, inputID, timeout).toInt;
     for(i <- fingerTable.size - 1 to 0 by -1){
-      println("value :"+i+" identifier:"+identifier+" inputID:"+inputID);
+      //println("value :"+i+" identifier:"+identifier+" inputID:"+inputID);
       var value = fingerTable(i).successor
       if (checkRange(identifier, inputID, value)) {
         //flag = false
@@ -194,21 +200,20 @@ class Node (base:Int, id:Int) extends Actor {
   def initFingerTable(nprimeRef:ActorRef): Unit ={
     implicit val timeout = new Timeout(Duration.create(100, "seconds"));
 
-    //println("Find for inputID : "+fingerTable(0).start)
     var future2: Future[ActorRef] = ask(nprimeRef, FindSuccessor(fingerTable(0).start)).mapTo[ActorRef];
-    successorRef = Await.result(future2, timeout.duration);
-    fingerTable(0).node = successorRef
+    fingerTable(0).node = Await.result(future2, timeout.duration);
+    successorRef = fingerTable(0).node
 
     var future: Future[Node] = ask(successorRef, GetNodeObject).mapTo[Node];
     var successorObj:Node = Await.result(future, timeout.duration);
     predecessor = successorObj.predecessor
     predecessorRef = successorObj.predecessorRef
+    successor = successorObj.identifier
+    fingerTable(0).successor = successor
 
     var future3: Future[Int] = ask(successorRef, UpdateSuccessor(identifier, self)).mapTo[Int];
     var dummy = Await.result(future3, timeout.duration);
-    successor = successorObj.identifier
-    fingerTable(0).successor = successor
-    
+
     for (i <- 0 until base - 1 ){
       if (checkRangeStartInclusive(identifier, fingerTable(i).successor, fingerTable(i+1).start)){
         fingerTable(i+1).node = fingerTable(i).node
@@ -225,19 +230,22 @@ class Node (base:Int, id:Int) extends Actor {
   //       //find last node p whose ith finger might be n
   //       p = find.predecessor(n - 2^(i-1))
   //       p.update_finger_table(n,i)
-  def update_others(node:ActorRef, nodeRef:ActorRef) = {
+  def update_others(node:ActorRef, startRef:ActorRef) = {
+    //println("In update_others "+identifier)
     implicit val timeout = new Timeout(Duration.create(100, "seconds"));
-    for (i <- 0 until base){
-      var index = identifier - Math.pow(2, base - i).toLong
+    for (i <- 1 to base){ //this is to ensure p precedes n by at least 2 ^ (i-1) nodes. But the finger table will have corresponding entry at i - 1
+      var index = identifier - Math.pow(2, i - 1).toLong
+      
       if (index < 0)
         index = Math.pow(2, base).toLong - Math.abs(index)%Math.pow(2, base).toLong;
-      var future: Future[ActorRef] = ask(node, FindPredecessor(index)).mapTo[ActorRef];
-      var p:ActorRef = Await.result(future, timeout.duration);
 
-      var future2: Future[Int] = ask(p, UpdateFingerTable(identifier, self, i, nodeRef)).mapTo[Int];
-      var p1:Int = Await.result(future2, timeout.duration);
+      var p:ActorRef = find_predecessor(index);
+      if(p != self) {
+        //println("Updating successor node of "+index+" "+ node+" fingerTable index "+index+" with reference "+ self)
+        var future2: Future[Int] = ask(p, UpdateFingerTable(identifier, self, i - 1, startRef)).mapTo[Int];
+        var p1: Int = Await.result(future2, timeout.duration);
+      }
     }
-    //println("Going out")
   }
 
   //if s is ith finger of n, update n's finger table with s
@@ -249,16 +257,18 @@ class Node (base:Int, id:Int) extends Actor {
 
   def update_finger_table(inputID:Long, nodeRef:ActorRef, i:Int, startRef:ActorRef):Unit ={
     //println("in Update finger table with identifier "+ identifier)
+    //println("In update_finger_table of "+identifier+" to update for "+inputID)
     implicit val timeout = new Timeout(Duration.create(100, "seconds"));
     if (checkRangeStartInclusive(identifier, fingerTable(i).successor, inputID)){
       fingerTable(i).node = nodeRef;
+      fingerTable(i).successor = inputID;
+      //println("Values were: identifier"+identifier+" successor:")
+      println(identifier+".fingerTable("+i+") is "+nodeRef)
       if (predecessorRef == startRef)
         return
-      //println(predecessorRef)
       var future2: Future[Int] = ask(predecessorRef, UpdateFingerTable(inputID, nodeRef, i, startRef)).mapTo[Int];
       var p:Int = Await.result(future2, timeout.duration);
     }
-    //println("Going out")
   }
 
   override def receive = {
@@ -302,8 +312,14 @@ class Node (base:Int, id:Int) extends Actor {
           sender ! self
         } else {
           println("In node " + identifier)
+/*
+          var future: Future[ActorRef] = ask(successorRef, TestMessage(ident, hopes + 1)).mapTo[ActorRef];
+          var p:ActorRef = Await.result(future, timeout.duration);
+          println("Returned from "+ self)
+          sender ! p
+*/
           for (i <- base - 1 to 0 by -1) {
-            if (checkRange(fingerTable(i).intervalStart, fingerTable(i).intervalEnd, ident)) {
+            if (checkRangeStartInclusive(fingerTable(i).intervalStart, fingerTable(i).intervalEnd, ident)) {
               println("index " + i + " Called")
               var future: Future[ActorRef] = ask(fingerTable(i).node, TestMessage(ident, hopes + 1)).mapTo[ActorRef];
               var p:ActorRef = Await.result(future, timeout.duration);
